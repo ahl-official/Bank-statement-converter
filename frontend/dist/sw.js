@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tally-connector-v1';
+const CACHE_NAME = 'tally-connector-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -32,6 +32,12 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   // Let API requests bypass service worker cache
   if (event.request.url.includes('/api/')) {
+    return;
+  }
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() => caches.match('/index.html'))
+    );
     return;
   }
   event.respondWith(

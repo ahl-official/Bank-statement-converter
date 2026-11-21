@@ -311,10 +311,12 @@ app.include_router(router, prefix="/api")
 app.include_router(router, prefix="")
 
 
-# Serve built frontend if dist folder exists
-frontend_dist = os.path.join(os.path.dirname(__file__), "frontend", "dist")
-if os.path.exists(frontend_dist):
-    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="static")
+# Serve built frontend only in local desktop mode (on Vercel, static files are served directly by Vercel edge)
+if not os.environ.get("VERCEL"):
+    frontend_dist = os.path.join(os.path.dirname(__file__), "frontend", "dist")
+    if os.path.exists(frontend_dist):
+        app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="static")
+
 
 
 if __name__ == "__main__":

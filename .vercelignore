@@ -1,0 +1,10 @@
+.git
+.agents
+frontend/node_modules
+__pycache__
+*.pdf
+*.xml
+*.log
+*.sqlite3
+*.sqlite3-*
+test_*.py
