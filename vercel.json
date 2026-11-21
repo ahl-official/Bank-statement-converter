@@ -1,4 +1,5 @@
 {
+  "buildCommand": "echo 'Using pre-built bundle'",
   "outputDirectory": "frontend/dist",
   "rewrites": [
     {
