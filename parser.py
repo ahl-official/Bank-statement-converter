@@ -6,6 +6,7 @@ Supports Excel (.xlsx, .xls), CSV, and PDF statements from Indian banks
 
 import io
 import re
+import math
 from typing import List, Dict, Any, Optional
 import pandas as pd
 
@@ -15,7 +16,10 @@ def clean_number(val: Any) -> float:
     if val is None or pd.isna(val):
         return 0.0
     if isinstance(val, (int, float)):
-        return float(val)
+        number = float(val)
+        if not math.isfinite(number):
+            raise ValueError("Statement contains a non-finite amount.")
+        return number
     
     s = str(val).strip()
     # Check if empty or hyphen
@@ -36,9 +40,11 @@ def clean_number(val: Any) -> float:
     s = re.sub(r"[₹$,\s]", "", s)
     try:
         num = float(s)
+        if not math.isfinite(num):
+            raise ValueError("Statement contains a non-finite amount.")
         return -num if is_negative else num
-    except ValueError:
-        return 0.0
+    except ValueError as exc:
+        raise ValueError(f"Could not read a statement amount: {val}") from exc
 
 
 def find_table_header_row(df: pd.DataFrame) -> int:
@@ -118,14 +124,20 @@ def parse_excel_or_csv(file_bytes: bytes, filename: str) -> List[Dict[str, Any]]
 
         debit_amt = clean_number(row[col_map["debit"]]) if "debit" in col_map else 0.0
         credit_amt = clean_number(row[col_map["credit"]]) if "credit" in col_map else 0.0
+        if debit_amt > 0 and credit_amt > 0:
+            raise ValueError(f"Both debit and credit contain amounts on {date_val}. Check this row.")
+        if debit_amt < 0 or credit_amt < 0:
+            raise ValueError(f"Negative debit or credit on {date_val}. Check the statement format.")
         
         if "amount" in col_map and "type" in col_map:
             amt = clean_number(row[col_map["amount"]])
             t_type = str(row[col_map["type"]]).strip().lower()
             if "dr" in t_type or "debit" in t_type:
                 debit_amt = amt
-            else:
+            elif t_type in {"cr", "credit", "receipt"}:
                 credit_amt = amt
+            else:
+                raise ValueError(f"Unknown transaction direction on {date_val}: {t_type}")
 
         ref_no = str(row[col_map["ref_no"]]).strip() if "ref_no" in col_map and not pd.isna(row[col_map["ref_no"]]) else ""
         bal_val = clean_number(row[col_map["balance"]]) if "balance" in col_map else None
@@ -167,22 +179,26 @@ def parse_bank_pdf(file_bytes: bytes, password: str = "") -> List[Dict[str, Any]
     with pdfplumber.open(io.BytesIO(file_bytes), password=password) as pdf:
         # First strategy: check if table extract returns discrete, clean rows
         has_discrete_tables = False
+        requires_text_fallback = False
         all_table_rows = []
 
         for page in pdf.pages:
             tables = page.extract_tables()
+            if not tables and re.search(r"^\d{2}[/-]\d{2}[/-]\d{2,4}\s", page.extract_text() or "", re.MULTILINE):
+                requires_text_fallback = True
             for table in tables:
                 if not table or len(table) < 2:
                     continue
                 # Check if rows are discrete or joined by newlines
                 first_data_row = table[1]
                 has_multiline = any("\n" in str(cell or "") for cell in first_data_row[:3])
+                requires_text_fallback = requires_text_fallback or has_multiline
                 if not has_multiline:
                     has_discrete_tables = True
                     for r in table:
                         all_table_rows.append(r)
 
-        if has_discrete_tables and len(all_table_rows) > 3:
+        if has_discrete_tables and not requires_text_fallback and len(all_table_rows) >= 2:
             try:
                 df_raw = pd.DataFrame(all_table_rows)
                 header_idx = find_table_header_row(df_raw)
@@ -200,6 +216,7 @@ def parse_bank_pdf(file_bytes: bytes, password: str = "") -> List[Dict[str, Any]
                         deb = clean_number(row[col_map["debit"]]) if "debit" in col_map else 0.0
                         crd = clean_number(row[col_map["credit"]]) if "credit" in col_map else 0.0
                         ref = str(row[col_map["ref_no"]]).strip() if "ref_no" in col_map and not pd.isna(row[col_map["ref_no"]]) else ""
+                        balance = clean_number(row[col_map["balance"]]) if "balance" in col_map else None
 
                         if deb > 0:
                             transactions.append({
@@ -207,6 +224,7 @@ def parse_bank_pdf(file_bytes: bytes, password: str = "") -> List[Dict[str, Any]
                                 "narration": n_val,
                                 "voucher_type": "Payment",
                                 "amount": deb,
+                                "balance": balance,
                                 "instrument_no": ref,
                             })
                         elif crd > 0:
@@ -215,11 +233,13 @@ def parse_bank_pdf(file_bytes: bytes, password: str = "") -> List[Dict[str, Any]
                                 "narration": n_val,
                                 "voucher_type": "Receipt",
                                 "amount": crd,
+                                "balance": balance,
                                 "instrument_no": ref,
                             })
                     if transactions:
                         return transactions
             except Exception:
+                transactions = []
                 pass  # Fall through to line-based parser
 
         # Second strategy: Robust text-line regex parsing (Standard for HDFC, ICICI, etc.)
@@ -290,6 +310,7 @@ def parse_bank_pdf(file_bytes: bytes, password: str = "") -> List[Dict[str, Any]
                             narr = mid
 
                         # Infer voucher type from closing balance change
+                        uncertain_direction = prev_closing is None
                         if prev_closing is not None:
                             vtype = "Receipt" if closing > prev_closing else "Payment"
                         else:
@@ -302,16 +323,11 @@ def parse_bank_pdf(file_bytes: bytes, password: str = "") -> List[Dict[str, Any]
                             "voucher_type": vtype,
                             "amount": amt,
                             "balance": closing,
+                            "needs_direction_review": uncertain_direction,
                             "instrument_no": ref,
                         }
                     else:
-                        curr = {
-                            "date": dt,
-                            "narration": rest,
-                            "voucher_type": "Payment",
-                            "amount": 0.0,
-                            "instrument_no": "",
-                        }
+                        raise ValueError(f"Could not read the amount on {dt}. Use the bank's Excel or CSV export.")
                 else:
                     if curr:
                         # Append continuation lines to narration

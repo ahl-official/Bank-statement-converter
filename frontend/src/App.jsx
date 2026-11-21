@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Download, FileText, Upload } from 'lucide-react';
+import { Download, Upload } from 'lucide-react';
 
 const money = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
 const field = 'mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5';
@@ -26,7 +26,12 @@ const COMPANY_BANKS = {
 async function responseError(response) {
   const body = await response.json().catch(() => ({}));
   const detail = body.detail;
-  const error = new Error(detail?.message || (typeof detail === 'string' ? detail : 'The request failed. Try again.'));
+  const fallback = response.status === 413
+    ? 'The statement is too large. Upload a file smaller than 4 MB.'
+    : response.status === 504
+      ? 'Processing took too long. Try a shorter statement or the bank’s Excel export.'
+      : 'The request failed. Check your connection and try again.';
+  const error = new Error(detail?.message || (typeof detail === 'string' ? detail : fallback));
   error.code = detail?.code;
   return error;
 }
@@ -40,6 +45,7 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [needsPassword, setNeedsPassword] = useState(false);
   const [rows, setRows] = useState([]);
+  const [warnings, setWarnings] = useState([]);
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [busy, setBusy] = useState('');
@@ -131,8 +137,13 @@ export default function App() {
 
   async function upload(statement, pdfPassword = '') {
     if (!statement || busy) return;
+    if (statement.size > 4 * 1024 * 1024) {
+      setError('Upload a statement smaller than 4 MB. Split larger statements by date.');
+      return;
+    }
     setFile(statement);
     setRows([]);
+    setWarnings([]);
     setStatementOpening(null);
     setStatementClosing(null);
     setFromDate('');
@@ -146,13 +157,14 @@ export default function App() {
     form.append('file', statement);
     form.append('password', pdfPassword);
     try {
-      const response = await fetch('/api/parse-statement', { method: 'POST', body: form });
+      const response = await fetch('/api/parse-statement', { method: 'POST', body: form, signal: AbortSignal.timeout(65000) });
       if (!response.ok) throw await responseError(response);
       const data = await response.json();
       if (!Array.isArray(data.transactions) || !data.transactions.length) {
         throw new Error('No transactions found. Check that this is a supported statement with readable text.');
       }
       setRows(data.transactions);
+      setWarnings(data.warnings || []);
       setStatementOpening(data.opening_balance ?? null);
       setStatementClosing(data.closing_balance ?? null);
     } catch (cause) {
@@ -170,6 +182,17 @@ export default function App() {
 
   async function download() {
     if (!selected.length || !bankLedger.trim() || busy) return;
+    if (selected.some((row) => row.needs_direction_review)) {
+      setError('Confirm the highlighted voucher type before downloading.');
+      return;
+    }
+    const exportKey = (row) => JSON.stringify([selectedCompany, bankLedger.trim(), row.date,
+      row.amount, row.voucher_type, row.instrument_no, row.original_narration]);
+    let history = [];
+    try { history = JSON.parse(localStorage.getItem('tally-export-history') || '[]'); } catch { /* Storage may be disabled. */ }
+    if (!Array.isArray(history)) history = [];
+    if (selected.some((row) => history.includes(exportKey(row))) &&
+        !window.confirm('Some selected transactions were already downloaded in this browser. Importing them again may create duplicates in Tally. Download again?')) return;
     setBusy('download');
     setError('');
     setMessage('');
@@ -177,6 +200,7 @@ export default function App() {
       const response = await fetch('/api/generate-xml', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(65000),
         body: JSON.stringify({
           bank_ledger_name: bankLedger.trim(),
           company_name: selectedCompany,
@@ -202,6 +226,9 @@ export default function App() {
       document.body.append(link);
       link.click();
       link.remove();
+      try {
+        localStorage.setItem('tally-export-history', JSON.stringify([...new Set([...history, ...selected.map(exportKey)])].slice(-10000)));
+      } catch { /* Download remains available when storage is full or disabled. */ }
       setTimeout(() => URL.revokeObjectURL(url), 10000);
       setMessage('Downloaded ' + selected.length + ' vouchers. In TallyPrime, use Alt+O → Transactions to import the XML.');
     } catch (cause) {
@@ -327,6 +354,10 @@ export default function App() {
               <Download size={17} /> {busy === 'download' ? 'Generating…' : 'Download Tally XML'}
             </button>
           </div>
+          {warnings.length > 0 && <div role="status" className="rounded-lg border border-amber-800 p-3 text-amber-200">
+            <p>Check these statement details before importing into Tally.</p>
+            <ul className="list-disc pl-5">{warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
+          </div>}
           <div className="flex flex-wrap items-end gap-3">
             <label className="text-sm font-medium text-slate-200">
               From date
@@ -418,7 +449,9 @@ export default function App() {
                     <td className="p-3">{row.original_narration}</td>
                     <td className="p-3">
                       <select aria-label={'Voucher type for ' + row.id} className="rounded border border-slate-700 bg-slate-950 p-1.5"
-                        value={row.voucher_type} onChange={(event) => updateRow(row.id, { voucher_type: event.target.value })}>
+                        value={row.needs_direction_review ? '' : row.voucher_type}
+                        onChange={(event) => updateRow(row.id, { voucher_type: event.target.value, needs_direction_review: false })}>
+                        <option value="" disabled>Confirm type</option>
                         <option>Payment</option><option>Receipt</option>
                       </select>
                     </td>

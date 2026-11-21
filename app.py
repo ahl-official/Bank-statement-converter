@@ -52,7 +52,7 @@ if from_date or to_date:
         st.stop()
 
 edited = st.data_editor(
-    [{"Include": True, **row} for row in transactions],
+    [{"Include": True, **row, "voucher_type": None if row.get("needs_direction_review") else row["voucher_type"]} for row in transactions],
     hide_index=True,
     disabled=["date", "narration", "amount", "instrument_no"],
     column_config={
@@ -66,6 +66,9 @@ selected = [
 
 if not selected or not bank_ledger.strip():
     st.info("Enter the Tally bank ledger name and select at least one transaction.")
+    st.stop()
+if any(row["voucher_type"] is None for row in selected):
+    st.info("Confirm Payment or Receipt for each selected transaction.")
     st.stop()
 
 try:

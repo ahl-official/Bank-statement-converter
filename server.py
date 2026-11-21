@@ -5,6 +5,7 @@ fuzzy ledger matching, persistent rule caching, and Tally XML generation.
 """
 
 import os
+import math
 from datetime import date
 from io import BytesIO
 from typing import List, Optional
@@ -180,8 +181,12 @@ async def upload_ledgers(file: UploadFile = File(...)):
 @router.post("/parse-statement")
 async def parse_statement(file: UploadFile = File(...), password: str = Form("")):
     """Parse statement rows and assign every counterpart to suspense."""
-    contents = await file.read()
-    filename = file.filename.lower()
+    contents = await file.read(4 * 1024 * 1024 + 1)
+    filename = (file.filename or "").lower()
+    if not contents:
+        raise HTTPException(status_code=400, detail="The uploaded file is empty.")
+    if len(contents) > 4 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Upload a statement smaller than 4 MB. Split larger statements by date.")
 
     try:
         if filename.endswith(".pdf"):
@@ -227,19 +232,45 @@ async def parse_statement(file: UploadFile = File(...), password: str = Form("")
                 opening_balance = round(f_bal + f_amt, 2)
 
     matched_records = []
+    warnings = []
+    previous_balance = None
+    previous_day = None
+    fingerprints = set()
     for i, t in enumerate(raw_txns):
         try:
             calendar_date = voucher_date(t["date"]).isoformat()
         except ValueError:
             calendar_date = None
+            warnings.append(f"Row {i + 1} has an invalid date. Check the source statement.")
+        amount = float(t["amount"])
+        if not math.isfinite(amount) or amount <= 0:
+            raise HTTPException(status_code=422, detail=f"Row {i + 1} has an invalid amount.")
+        balance = float(t["balance"]) if t.get("balance") is not None else None
+        if balance is not None and not math.isfinite(balance):
+            balance = None
+        if previous_day and calendar_date and calendar_date < previous_day:
+            warnings.append(f"Row {i + 1} is out of date order. Check balance calculations.")
+        if previous_balance is not None and balance is not None:
+            movement = amount if t["voucher_type"] == "Receipt" else -amount
+            if abs(previous_balance + movement - balance) > 0.011:
+                warnings.append(f"Balance mismatch at row {i + 1}. Check for missing rows or an incorrect voucher type.")
+        previous_balance = balance
+        previous_day = calendar_date
+        fingerprint = (calendar_date, t["narration"], amount, t["voucher_type"], t.get("instrument_no", ""))
+        if fingerprint in fingerprints:
+            warnings.append(f"Row {i + 1} repeats another transaction. Check whether both entries belong in Tally.")
+        fingerprints.add(fingerprint)
+        if t.get("needs_direction_review"):
+            warnings.append(f"Confirm Payment or Receipt for row {i + 1}; the opening balance was unavailable.")
         matched_records.append({
             "id": f"txn_{i+1}",
-            "selected": True,
+            "selected": calendar_date is not None,
             "date": t["date"],
             "calendar_date": calendar_date,
             "voucher_type": t["voucher_type"],
             "amount": float(t["amount"]),
-            "balance": float(t["balance"]) if t.get("balance") is not None else None,
+            "balance": balance,
+            "needs_direction_review": t.get("needs_direction_review", False),
             "assigned_ledger": SUSPENSE_LEDGER,
             "original_narration": t["narration"],
             "instrument_no": t.get("instrument_no", ""),
@@ -251,6 +282,7 @@ async def parse_statement(file: UploadFile = File(...), password: str = Form("")
         "transactions": matched_records,
         "opening_balance": opening_balance,
         "closing_balance": closing_balance,
+        "warnings": warnings,
     }
 
 
