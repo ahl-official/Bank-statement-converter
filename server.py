@@ -8,7 +8,7 @@ import os
 from datetime import date
 from io import BytesIO
 from typing import List, Optional
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -29,6 +29,8 @@ app = FastAPI(
     description="Local bank statement converter for Tally voucher XML",
     version="2.0.0",
 )
+
+router = APIRouter()
 
 
 @app.middleware("http")
@@ -130,19 +132,19 @@ class GenerateXmlRequest(BaseModel):
     date_to: Optional[date] = None
 
 
-@app.get("/api/companies")
+@router.get("/companies")
 def get_companies():
     """Returns the list of companies and their associated bank accounts."""
     return {"companies": COMPANY_BANKS}
 
 
-@app.get("/api/ledgers")
+@router.get("/ledgers")
 def get_ledgers():
     """Returns the list of current active ledgers."""
     return {"ledgers": ACTIVE_LEDGERS, "count": len(ACTIVE_LEDGERS)}
 
 
-@app.post("/api/upload-ledgers")
+@router.post("/upload-ledgers")
 async def upload_ledgers(file: UploadFile = File(...)):
     """Upload Tally chart of accounts export to update active ledgers."""
     global ACTIVE_LEDGERS
@@ -175,7 +177,7 @@ async def upload_ledgers(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Failed to parse ledgers: {str(e)}")
 
 
-@app.post("/api/parse-statement")
+@router.post("/parse-statement")
 async def parse_statement(file: UploadFile = File(...), password: str = Form("")):
     """Parse statement rows and assign every counterpart to suspense."""
     contents = await file.read()
@@ -252,7 +254,7 @@ async def parse_statement(file: UploadFile = File(...), password: str = Form("")
     }
 
 
-@app.get("/api/mappings")
+@router.get("/mappings")
 def get_mappings(bank_ledger_name: str = ""):
     """Retrieve learned memory rules."""
     rules = list_rules(bank_ledger_name)
@@ -263,7 +265,7 @@ def get_mappings(bank_ledger_name: str = ""):
     }, "learned_rules": rules}
 
 
-@app.post("/api/generate-xml")
+@router.post("/generate-xml")
 def generate_xml(req: GenerateXmlRequest):
     """Export selected vouchers against Suspense."""
     if req.date_from and req.date_to and req.date_from > req.date_to:
@@ -302,6 +304,11 @@ def generate_xml(req: GenerateXmlRequest):
         headers={"Content-Disposition": "attachment; filename=tally_import.xml",
                  "X-Learned-Patterns": "0"},
     )
+
+
+# Include routes with both /api prefix (for local Vite proxy & Vercel) and root (for direct rewrites)
+app.include_router(router, prefix="/api")
+app.include_router(router, prefix="")
 
 
 # Serve built frontend if dist folder exists
