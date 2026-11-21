@@ -508,4 +508,21 @@ Opens automatically at `http://localhost:8501`
   - Recompiled production bundle and restarted local server.
 
 ---
+
+## 22. Vercel Deployment & PWA (Progressive Web App) Setup (2026-11-21)
+- **GitHub Repository Synchronized:** Pushed complete clean codebase to `https://github.com/ahl-official/Bank-statement-converter.git` on branch `main` (with confidential statement PDFs and voucher XMLs safely excluded via `.gitignore`).
+- **Vercel Serverless Architecture:**
+  - Configured `vercel.json` with static CDN routing for `frontend/dist` and Python serverless function in `api/index.py`.
+  - Added dual router prefix support in `server.py` and `fix_vercel_path` middleware in `api/index.py` to seamlessly handle Vercel rewritten internal paths.
+  - Adapted `learning.py` SQLite database path to use `/tmp` on serverless environments to prevent read-only filesystem errors.
+  - Cleaned `requirements.txt` to remove unnecessary streamlit overhead for lean, fast serverless deployment.
+  - **Live Production URL:** `https://bank-statement-converter-green.vercel.app`
+- **PWA (Progressive Web App) Implementation:**
+  - Created Web App Manifest (`frontend/public/manifest.webmanifest`) with standalone display mode, theme colors, and icons.
+  - Created Service Worker (`frontend/public/sw.js`) with cache management and automatic bypass for `/api/` endpoints.
+  - Registered Service Worker in `frontend/src/main.jsx`.
+  - Added native **"Install App"** button in header responding to `beforeinstallprompt` event, allowing 1-click installation as a native desktop/mobile app.
+  - Rebuilt production bundle and redeployed to Vercel and local server.
+
+---
 *Documented and generated for seamless project onboarding and IDE integration. Last updated: 2026-11-21.*

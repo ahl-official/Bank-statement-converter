@@ -214,12 +214,15 @@ export default function App() {
   return (
     <main className="mx-auto max-w-6xl space-y-6 px-5 py-10 md:px-8">
       <header className="flex flex-wrap items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-3">
-            <FileText className="text-teal-300" size={24} />
-            <h1 className="text-2xl font-semibold md:text-3xl">Bank Statement Converter</h1>
+        <div className="flex items-center gap-3.5">
+          <img src="/favicon.svg" alt="Tally Smart Connector" className="h-11 w-11 rounded-xl shadow-lg border border-slate-700/60" />
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-semibold md:text-3xl text-slate-100">Bank Statement Converter</h1>
+              <span className="rounded-md border border-teal-500/30 bg-teal-500/10 px-2 py-0.5 text-xs font-medium text-teal-300">Tally XML</span>
+            </div>
+            <p className="text-slate-400 text-xs md:text-sm">Convert bank statements to zero-suspense TallyPrime XML vouchers.</p>
           </div>
-          <p className="text-slate-400 text-sm">Convert bank statements to zero-suspense TallyPrime XML vouchers.</p>
         </div>
         {!isInstalled && (
           <button
