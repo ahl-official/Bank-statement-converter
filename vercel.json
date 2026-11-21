@@ -1,4 +1,5 @@
 {
+  "name": "bank-statement-converter",
   "buildCommand": "cd frontend && pnpm run build",
   "outputDirectory": "frontend/dist",
   "rewrites": [
