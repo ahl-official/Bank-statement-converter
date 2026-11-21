@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Download, FileText, Upload } from 'lucide-react';
 
 const money = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
@@ -47,6 +47,36 @@ export default function App() {
   const [error, setError] = useState('');
   const [statementOpening, setStatementOpening] = useState(null);
   const [statementClosing, setStatementClosing] = useState(null);
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+
+  useEffect(() => {
+    const handler = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+
+    if (window.matchMedia('(display-mode: standalone)').matches) {
+      setIsInstalled(true);
+    }
+
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  async function installApp() {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setIsInstalled(true);
+      }
+      setDeferredPrompt(null);
+    } else {
+      alert("To install on Windows (Chrome or Edge):\nClick the 'Install App' icon (small monitor with a down arrow) in your browser's address bar!\n\nOn Mobile (Android/iOS):\nTap your browser menu (⋮ or Share) → 'Add to Home screen'.");
+    }
+  }
+
   const invalidRange = Boolean(fromDate && toDate && fromDate > toDate);
   const inDateRange = (row) =>
     (!fromDate || (row.calendar_date && row.calendar_date >= fromDate)) &&
@@ -183,12 +213,24 @@ export default function App() {
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 px-5 py-10 md:px-8">
-      <header className="space-y-2">
-        <div className="flex items-center gap-3">
-          <FileText className="text-teal-300" size={24} />
-          <h1 className="text-2xl font-semibold md:text-3xl">Bank Statement Converter</h1>
+      <header className="flex flex-wrap items-center justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-3">
+            <FileText className="text-teal-300" size={24} />
+            <h1 className="text-2xl font-semibold md:text-3xl">Bank Statement Converter</h1>
+          </div>
+          <p className="text-slate-400 text-sm">Convert bank statements to zero-suspense TallyPrime XML vouchers.</p>
         </div>
-        <p className="text-slate-400">Convert a bank statement to Tally XML and clear Suspense in Tally.</p>
+        {!isInstalled && (
+          <button
+            onClick={installApp}
+            className="inline-flex items-center gap-2 rounded-lg border border-teal-500/40 bg-teal-500/10 px-3.5 py-2 text-sm font-medium text-teal-300 hover:bg-teal-500/20 transition cursor-pointer"
+            title="Install as desktop application"
+          >
+            <Download size={16} />
+            <span>Install App</span>
+          </button>
+        )}
       </header>
 
       <section className="grid gap-5 rounded-xl border border-slate-800 bg-slate-900 p-5 md:grid-cols-3">
