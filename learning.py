@@ -1,12 +1,17 @@
 """Local, accountant-confirmed merchant patterns. No automatic guesses are trained."""
 
+import os
+import tempfile
 import hashlib
 import re
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-DB_PATH = Path(__file__).with_name("ledger_learning.sqlite3")
+if os.environ.get("VERCEL"):
+    DB_PATH = Path(tempfile.gettempdir()) / "ledger_learning.sqlite3"
+else:
+    DB_PATH = Path(__file__).with_name("ledger_learning.sqlite3")
 
 
 def merchant_pattern(narration):
